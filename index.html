@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>장비 단말 — WorkerBadge (서버 없음)</title>
+<style>
+/* 장비에 붙은 태블릿 화면. 우리 서버 없이 이 화면이 직접: 일회용 QR 발급 → 응답 QR 읽기 → 서명 확인 → 블록체인 조회 */
+:root{--bg:#12161C;--panel:#1A2029;--ink:#E6E9EE;--muted:#9AA4B2;--line:#2C3440;--amber:#F2B624;--ok:#6FD39E;--ok-bg:#16301F;--no:#F08A7E;--no-bg:#3A1C19;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;--sans:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);min-height:100vh}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:18px}
+.chip{display:inline-block;font-size:12.5px;padding:2px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.chip.ok{color:var(--ok);border-color:var(--ok)} .chip.no{color:var(--no);border-color:var(--no)}
+select,button,textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+button{cursor:pointer} button.primary{background:var(--amber);color:#2A1F00;border-color:var(--amber);font-weight:700}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:20px;padding:20px;max-width:1150px;margin:0 auto;align-items:start}
+@media (max-width:860px){main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}
+.eqname{font-size:26px;font-weight:800;margin:0}
+.qr{background:#fff;border-radius:12px;padding:10px;max-width:320px;margin:12px auto 0}
+.qr svg{width:100%;height:auto;display:block}
+.bar{height:6px;border-radius:3px;background:var(--line);margin:12px auto 4px;max-width:320px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--amber)}
+.hint{color:var(--muted);font-size:13px;text-align:center;margin:4px 0}
+.mode{display:flex;justify-content:center;gap:12px;font-size:13px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+.state.ok{border-color:var(--ok);background:var(--ok-bg)} .state.no{border-color:var(--no);background:var(--no-bg)}
+.big{font-size:40px;font-weight:800;line-height:1.15;margin:2px 0 6px}
+.state.ok .big{color:var(--ok)} .state.no .big{color:var(--no)}
+.steps{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:4px;font-size:13.5px}
+.steps li::before{content:attr(data-m);display:inline-block;width:20px;font-weight:800}
+.steps li.ok::before{color:var(--ok)} .steps li.no::before{color:var(--no)}
+.cam{position:relative;margin-top:14px;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3;display:grid;place-items:center}
+.cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.cam p{position:absolute;color:var(--muted);font-size:13px;margin:0;padding:12px;text-align:center}
+.mono{font-family:var(--mono);font-size:12px;color:var(--muted);word-break:break-all}
+details{margin-top:10px} summary{cursor:pointer;color:var(--muted);font-size:13px}
+textarea{width:100%;min-height:64px;font:12px var(--mono)}
+.log{list-style:none;margin:0;padding:0;font-size:13px;max-height:220px;overflow:auto}
+.log li{padding:6px 0;border-bottom:1px solid var(--line)}
+section.wide{grid-column:1/-1}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔒 장비 단말 <span style="font-weight:400;font-size:13px;color:var(--muted)">서버 없이 블록체인 직접 조회</span></h1>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <span class="chip" id="net">블록체인 연결 중…</span>
+    <select id="eq" aria-label="장비 선택"></select>
+  </div>
+</header>
+<main>
+  <section class="card" aria-labelledby="qrhint">
+    <p class="eqname" id="eqName">-</p>
+    <p class="mono" id="eqMeta" style="margin:2px 0 0"></p>
+    <div class="qr" id="qr" role="img" aria-label="휴대폰으로 찍을 QR 코드"></div>
+    <div class="bar" aria-hidden="true"><i id="bar" style="width:100%"></i></div>
+    <p class="hint" id="qrhint">① 휴대폰 카메라로 찍으면 MetaMask 앱이 열려요 · <span id="left">60</span>초 뒤 새 QR</p>
+    <div class="mode" role="radiogroup" aria-label="QR 종류">
+      <label><input type="radio" name="mode" value="mm" checked> MetaMask 앱으로 열기</label>
+      <label><input type="radio" name="mode" value="plain"> 일반 링크</label>
+    </div>
+    <p class="hint"><a id="link" href="#" target="_blank" style="color:var(--amber)">링크 열기</a></p>
+  </section>
+
+  <section class="card state" id="state" aria-live="polite">
+    <p style="margin:0;color:var(--muted);font-size:13px">시동 상태</p>
+    <div class="big" id="verdict">🔒 잠김</div>
+    <div id="detail">② 휴대폰에서 서명하면 응답 QR이 나와요. ③ 그 화면을 아래 카메라에 보여 주세요.</div>
+    <ul class="steps" id="steps"></ul>
+    <div class="cam" id="camBox"><video id="video" playsinline muted hidden></video><p id="camMsg"><button class="primary" id="camBtn">카메라 켜기</button><br><br>장비 카메라로 휴대폰의 응답 QR을 읽어요</p></div>
+    <canvas id="canvas" hidden></canvas>
+    <details><summary>카메라가 없으면: 응답 코드 붙여넣기</summary>
+      <textarea id="paste" placeholder="WB1|FL-001|...|0x..."></textarea>
+      <button id="pasteBtn" style="margin-top:6px">확인</button>
+    </details>
+  </section>
+
+  <section class="card wide" aria-labelledby="logh">
+    <h2 id="logh" style="font-size:15px;margin:0 0 6px">이 장비의 접근 기록 <span class="mono">(이 화면에만 저장)</span></h2>
+    <ul class="log" id="log"><li class="mono">아직 기록이 없어요.</li></ul>
+  </section>
+</main>
+<script src="vendor/ethers.umd.min.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="vendor/jsQR.js"></script>
+<script src="config.js"></script>
+<script>
+const C = window.WB_CONFIG, $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const q = new URLSearchParams(location.search);
+let EQ = C.equipment.find((e) => e.id === q.get("eq")) || C.equipment[0];
+let chain = null, contract = null, cur = null, busy = false, resultUntil = 0, logs = [];
+const used = new Set(); // 한 번 쓴 nonce (재사용 차단)
+
+function randomNonce() {
+  const b = new Uint8Array(16); crypto.getRandomValues(b);
+  return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+function workerLink(nonce, exp) {
+  const base = C.workerUrl || new URL("worker.html", location.href).href.split("?")[0];
+  const p = new URLSearchParams({ eq: EQ.id, n: nonce, x: String(exp) });
+  for (const k of ["rpc", "contract", "chain"]) if (q.get(k)) p.set(k, q.get(k)); // 테스트 설정은 그대로 넘긴다
+  return `${base}?${p}`;
+}
+function newChallenge() {
+  const nonce = randomNonce();
+  cur = { eq: EQ.id, nonce, exp: Math.floor(Date.now() / 1000) + C.challengeTtlSec };
+  const link = workerLink(nonce, cur.exp);
+  const mm = document.querySelector('input[name="mode"]:checked').value === "mm" && link.startsWith("https://");
+  const content = mm ? `https://metamask.app.link/dapp/${link.replace(/^https:\/\//, "")}` : link;
+  const qr = qrcode(0, "M"); qr.addData(content); qr.make();
+  $("qr").innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+  $("qr").dataset.content = content; $("link").href = content;
+  $("qrhint").innerHTML = (mm ? "① 휴대폰 카메라로 찍으면 MetaMask 앱이 열려요" : "① 휴대폰 카메라로 찍어 링크를 여세요")
+    + ` · <span id="left">${C.challengeTtlSec}</span>초 뒤 새 QR`;
+}
+function tick() {
+  if (!cur) return;
+  const left = cur.exp - Date.now() / 1000;
+  if (left <= 0) { newChallenge(); return; }
+  if ($("left")) $("left").textContent = Math.ceil(left);
+  $("bar").style.width = (left / C.challengeTtlSec) * 100 + "%";
+  if (resultUntil && Date.now() > resultUntil) { resultUntil = 0; idle(); }
+}
+function idle() {
+  $("state").className = "card state"; $("verdict").textContent = "🔒 잠김";
+  $("detail").textContent = "② 휴대폰에서 서명하면 응답 QR이 나와요. ③ 그 화면을 아래 카메라에 보여 주세요.";
+  $("steps").innerHTML = "";
+}
+function show(allowed, title, detail, steps) {
+  $("state").className = "card state " + (allowed ? "ok" : "no");
+  $("verdict").textContent = allowed ? "✅ 시동 허용" : "❌ 시동 거부";
+  $("detail").innerHTML = `<b>${esc(title)}</b>${detail ? " — " + esc(detail) : ""}`;
+  $("steps").innerHTML = steps.map((s) => `<li class="${s[0] ? "ok" : "no"}" data-m="${s[0] ? "✓" : "✗"}">${esc(s[1])}</li>`).join("");
+  resultUntil = Date.now() + 10000;
+  logs.unshift({ at: new Date().toLocaleTimeString("ko-KR"), allowed, text: `${EQ.name}: ${title}${detail ? " — " + detail : ""}` });
+  logs = logs.slice(0, 50);
+  try { localStorage.setItem("wb-terminal-log-" + EQ.id, JSON.stringify(logs)); } catch {}
+  renderLog();
+}
+function renderLog() {
+  $("log").innerHTML = logs.length ? logs.map((l) => `<li><span style="color:var(--${l.allowed ? "ok" : "no"})">${l.allowed ? "허용" : "거부"}</span> ${esc(l.text)} <span class="mono">${l.at}</span></li>`).join("") : '<li class="mono">아직 기록이 없어요.</li>';
+}
+const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+// 응답 코드: WB1|장비|nonce|서명
+async function verifyCode(code) {
+  if (busy) return; busy = true;
+  try {
+    const m = /^WB1\|([A-Z]{2}-\d{3})\|([0-9a-f]{32})\|(0x[0-9a-fA-F]{130})$/.exec(String(code).trim());
+    if (!m) return show(false, "알 수 없는 응답 코드", "WorkerBadge 응답 QR이 아니에요", []);
+    const [, eq, nonce, sig] = m;
+    const steps = [];
+    if (eq !== EQ.id) return show(false, "다른 장비용 응답", `${eq} 용 서명이에요`, [[false, "장비 일치"]]);
+    if (used.has(nonce)) return show(false, "이미 쓴 QR", "같은 서명을 다시 쓸 수 없어요 (재사용 차단)", [[false, "일회용 확인"]]);
+    if (!cur || nonce !== cur.nonce) return show(false, "지난 QR", "지금 화면의 QR로 다시 찍어 주세요", [[false, "현재 QR 일치"]]);
+    if (Date.now() / 1000 > cur.exp) return show(false, "만료된 QR", "", [[false, "유효 시간"]]);
+    used.add(nonce); steps.push([true, "일회용 QR 확인 (한 번 쓰면 폐기)"]);
+    newChallenge(); // 바로 다음 사람용 QR
+
+    let worker;
+    try { worker = ethers.verifyMessage(window.WB_MESSAGE(eq, nonce), sig); }
+    catch { return show(false, "서명 오류", "", [...steps, [false, "서명 확인"]]); }
+    steps.push([true, `서명에서 주소 복원 → ${short(worker)}`]);
+
+    if (!contract) throw new Error("블록체인에 아직 연결되지 않았어요");
+    const t0 = performance.now();
+    const typeHash = ethers.id(EQ.type);
+    const [ok, reqs] = await Promise.all([contract.isQualified(worker, typeHash), contract.requirementsOf(typeHash)]);
+    const ms = performance.now() - t0;
+    for (const t of reqs.map(Number)) {
+      const id = Number(await contract.badgeOf(worker, t));
+      if (!id) { steps.push([false, `${window.WB_TYPES[t]}: 배지 없음`]); continue; }
+      const b = await contract.badges(id);
+      const valid = await contract.hasValidBadge(worker, t);
+      const why = b.revoked ? "정지됨" : valid ? `유효 (만료 ${new Date(Number(b.expiresAt) * 1000).toLocaleDateString("ko-KR")})` : "만료됨";
+      steps.push([valid, `${window.WB_TYPES[t]}: 배지 #${id} ${why}`]);
+    }
+    steps.push([ok, `${C.network} 직접 조회 ${ms.toFixed(0)}ms · 가스 0 · 서버 거치지 않음`]);
+    show(ok, short(worker), ok ? "유효한 자격 확인" : "필요한 배지가 없거나 만료·정지됨", steps);
+  } catch (e) {
+    show(false, "확인 실패", e.message, []);
+  } finally { busy = false; }
+}
+
+// 카메라로 응답 QR 읽기
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+    const v = $("video"); v.srcObject = stream; v.hidden = false; await v.play();
+    $("camMsg").hidden = true;
+    const cv = $("canvas"), ctx = cv.getContext("2d", { willReadFrequently: true });
+    let last = 0;
+    const loop = (t) => {
+      if (t - last > 250 && v.videoWidth && !busy && !resultUntil) {
+        last = t; cv.width = v.videoWidth; cv.height = v.videoHeight;
+        ctx.drawImage(v, 0, 0);
+        const img = ctx.getImageData(0, 0, cv.width, cv.height);
+        const hit = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
+        if (hit && hit.data.startsWith("WB1|")) verifyCode(hit.data);
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  } catch (e) {
+    $("camMsg").innerHTML = `카메라를 켤 수 없어요 (${esc(e.message)}).<br>아래 '응답 코드 붙여넣기'를 쓰세요.`;
+  }
+}
+
+async function connect() {
+  try {
+    chain = await window.WB_PROVIDER();
+    contract = new ethers.Contract(C.contract, window.WB_ABI, chain.provider);
+    $("net").className = "chip ok";
+    $("net").textContent = `${C.network} · 블록 #${chain.block.toLocaleString()} · ${new URL(chain.url).host}`;
+    $("eqMeta").textContent = `${EQ.id} · 컨트랙트 ${short(C.contract)}`;
+  } catch (e) { $("net").className = "chip no"; $("net").textContent = "블록체인 연결 실패"; $("detail").textContent = e.message; }
+}
+
+$("eq").innerHTML = C.equipment.map((e) => `<option value="${e.id}">${esc(e.name)} (${e.id})</option>`).join("");
+$("eq").value = EQ.id;
+function setEq() {
+  $("eqName").textContent = EQ.name; document.title = `${EQ.name} — 장비 단말`;
+  $("eqMeta").textContent = `${EQ.id} · 컨트랙트 ${short(C.contract)}`;
+  try { logs = JSON.parse(localStorage.getItem("wb-terminal-log-" + EQ.id)) || []; } catch { logs = []; }
+  renderLog(); idle(); newChallenge();
+}
+$("eq").onchange = () => { EQ = C.equipment.find((e) => e.id === $("eq").value); setEq(); };
+document.querySelectorAll('input[name="mode"]').forEach((r) => (r.onchange = newChallenge));
+$("camBtn").onclick = startCamera;
+$("pasteBtn").onclick = () => { verifyCode($("paste").value); $("paste").value = ""; };
+setEq(); connect(); setInterval(tick, 500);
+</script>
+</body>
+</html>
