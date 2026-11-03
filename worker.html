@@ -53,11 +53,11 @@ const EQ = C.equipment.find((e) => e.id === eqId);
 let account = null, timer = null;
 
 function render() {
-  if (!EQ || !/^[0-9a-f]{32}$/.test(nonce || "")) {
+  if (!EQ || !/^0x[0-9a-f]{64}$/.test(nonce || "") || !exp) {
     $("req").innerHTML = `<h2>장비 QR을 찍어 주세요</h2><p class="sub">장비 화면의 QR을 휴대폰 카메라로 찍으면 이 페이지가 열려요.</p>`;
     return;
   }
-  const msg = window.WB_MESSAGE(EQ.id, nonce);
+  const td = window.WB_TYPED(EQ.id, nonce, exp);
   const left = exp ? Math.floor(exp - Date.now() / 1000) : null;
   if (!window.ethereum) {
     const deep = location.protocol === "https:" ? `https://metamask.app.link/dapp/${location.href.replace(/^https:\/\//, "")}` : null;
@@ -67,21 +67,24 @@ function render() {
     return;
   }
   $("req").innerHTML = `<h2>🚜 ${esc(EQ.name)} 시동 인증</h2>
-    <p class="sub">아래 문장에 서명하면 장비가 블록체인에서 내 자격을 확인해요.${left !== null ? ` 남은 시간 <b id="left">${Math.max(0, left)}</b>초` : ""}</p>
-    <p class="mono" style="background:var(--bg);border-radius:8px;padding:8px">${esc(msg)}</p>
+    <p class="sub">아래 내용에 서명하면 장비가 블록체인에서 내 자격을 확인해요 (가스비 없음).${left !== null ? ` 남은 시간 <b id="left">${Math.max(0, left)}</b>초` : ""}</p>
+    <p class="mono" style="background:var(--bg);border-radius:8px;padding:8px">장비: ${esc(EQ.id)}\n유효 시각: ${new Date(exp * 1000).toLocaleTimeString("ko-KR")}까지\n체인: ${C.chainId} · 컨트랙트 ${C.contract.slice(0, 10)}…\nnonce: ${nonce.slice(0, 18)}…</p>
     <button class="btn" id="sign">MetaMask로 서명하기</button>`;
-  $("sign").onclick = () => sign(msg);
+  $("sign").onclick = () => sign(td);
 }
 
-async function sign(msg) {
+async function sign(td) {
   const b = $("sign"); b.disabled = true; b.textContent = "MetaMask에서 확인을 눌러 주세요…";
   try {
     const accs = await window.ethereum.request({ method: "eth_requestAccounts" });
     account = ethers.getAddress(accs[0]);
-    const hex = ethers.hexlify(ethers.toUtf8Bytes(msg));
-    const sig = await window.ethereum.request({ method: "personal_sign", params: [hex, account] });
-    if (ethers.verifyMessage(msg, sig) !== account) throw new Error("서명이 계정과 맞지 않아요");
-    const code = `WB1|${EQ.id}|${nonce}|${sig}`;
+    // EIP-712: MetaMask 가 장비·nonce·만료 시각을 항목별로 보여 준다
+    const payload = { types: { EIP712Domain: [{ name: "name", type: "string" }, { name: "version", type: "string" }, { name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }], ...td.types },
+      domain: td.domain, primaryType: "Access", message: td.message };
+    let sig = await window.ethereum.request({ method: "eth_signTypedData_v4", params: [account, JSON.stringify(payload)] });
+    if (/^[0-9a-fA-F]+$/.test(sig)) sig = "0x" + sig; // 일부 지갑은 0x 없이 돌려준다
+    if (ethers.verifyTypedData(td.domain, td.types, td.message, sig) !== account) throw new Error("서명이 계정과 맞지 않아요 (스마트 계정이면 일반 계정으로 바꿔 주세요)");
+    const code = `WB2|${EQ.id}|${nonce}|${exp}|${sig}`;
     const qr = qrcode(0, "L"); qr.addData(code); qr.make();
     $("resp").hidden = false;
     $("resp").innerHTML = `<h2>③ 이 화면을 장비 카메라에 보여 주세요</h2>

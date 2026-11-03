@@ -35,8 +35,12 @@ window.WB_ABI = [
   "function requirementsOf(bytes32 equipmentType) view returns (uint8[])",
 ];
 window.WB_TYPES = ["지게차 면허", "크레인 면허", "위험물 취급", "안전교육 이수"];
-// 서명할 문장 — scripts/verifier.js 의 messageFor 와 반드시 같아야 한다
-window.WB_MESSAGE = (eq, nonce) => `WorkerBadge 장비 접근 요청\n장비: ${eq}\nnonce: ${nonce}`;
+// 서명 형식: EIP-712 (scripts/verifier.js 와 같음). 체인 ID·컨트랙트 주소가 서명에 묶여서 다른 체인·배포본에서 못 쓴다
+window.WB_ACCESS_TYPES = { Access: [{ name: "equipmentId", type: "string" }, { name: "nonce", type: "bytes32" }, { name: "expiresAt", type: "uint64" }] };
+window.WB_TYPED = (eq, nonce, expiresAt) => ({
+  domain: { name: "WorkerBadge Access", version: "1", chainId: window.WB_CONFIG.chainId, verifyingContract: window.WB_CONFIG.contract },
+  types: window.WB_ACCESS_TYPES, primaryType: "Access", message: { equipmentId: eq, nonce, expiresAt: Number(expiresAt) },
+});
 
 // 공개 RPC 중 응답하는 것 하나를 골라 연결
 window.WB_PROVIDER = async () => {
